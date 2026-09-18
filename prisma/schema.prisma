@@ -1,0 +1,54 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Project {
+  id          Int     @id @default(autoincrement())
+  title       String
+  description String?
+  tasks       Task[]
+
+  @@map("projects")
+}
+
+model Task {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  priority    Int       // 0-3 (lowest to highest)
+  status      Int       // 0-4 (different task states)
+  progress    Int       @default(0) // 0-100
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
+  projectId   Int?      @map("project_id")
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  tags        TaskTag[]
+
+  @@map("tasks")
+}
+
+model Tag {
+  id    Int       @id @default(autoincrement())
+  title String
+  tasks TaskTag[]
+
+  @@map("tags")
+}
+
+model TaskTag {
+  taskId Int
+  tagId  Int
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([taskId, tagId])
+  @@map("task_tags")
+}
