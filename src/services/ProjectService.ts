@@ -1,16 +1,14 @@
+import { eq } from 'drizzle-orm';
 import { ProjectInput, ProjectUpdateInput } from '../types';
-import { prisma } from '../lib/prisma';
+import { db } from '../lib/db';
+import { projects } from '../db/schema';
 
 export class ProjectService {
   async getAllProjects() {
     try {
-      return await prisma.project.findMany({
-        include: {
-          tasks: true,
-        },
-        orderBy: {
-          id: 'asc',
-        },
+      return await db.query.projects.findMany({
+        with: { tasks: true },
+        orderBy: (project, { asc }) => [asc(project.id)],
       });
     } catch (error) {
       throw new Error(`Failed to fetch projects: ${error}`);
@@ -19,16 +17,12 @@ export class ProjectService {
 
   async getProjectById(id: number) {
     try {
-      return await prisma.project.findUnique({
-        where: { id },
-        include: {
+      return await db.query.projects.findFirst({
+        where: eq(projects.id, id),
+        with: {
           tasks: {
-            include: {
-              tags: {
-                include: {
-                  tag: true,
-                },
-              },
+            with: {
+              tags: { with: { tag: true } },
             },
           },
         },
@@ -44,14 +38,17 @@ export class ProjectService {
     }
 
     try {
-      return await prisma.project.create({
-        data: {
+      const [created] = await db
+        .insert(projects)
+        .values({
           title: input.title,
           description: input.description,
-        },
-        include: {
-          tasks: true,
-        },
+        })
+        .returning();
+
+      return db.query.projects.findFirst({
+        where: eq(projects.id, created.id),
+        with: { tasks: true },
       });
     } catch (error) {
       throw new Error(`Failed to create project: ${error}`);
@@ -64,15 +61,17 @@ export class ProjectService {
     }
 
     try {
-      return await prisma.project.update({
-        where: { id },
-        data: {
+      await db
+        .update(projects)
+        .set({
           ...(input.title && { title: input.title }),
           ...(input.description !== undefined && { description: input.description }),
-        },
-        include: {
-          tasks: true,
-        },
+        })
+        .where(eq(projects.id, id));
+
+      return db.query.projects.findFirst({
+        where: eq(projects.id, id),
+        with: { tasks: true },
       });
     } catch (error) {
       throw new Error(`Failed to update project: ${error}`);
@@ -81,9 +80,7 @@ export class ProjectService {
 
   async deleteProject(id: number) {
     try {
-      await prisma.project.delete({
-        where: { id },
-      });
+      await db.delete(projects).where(eq(projects.id, id));
       return true;
     } catch (error) {
       throw new Error(`Failed to delete project: ${error}`);

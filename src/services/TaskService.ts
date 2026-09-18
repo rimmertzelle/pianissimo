@@ -1,5 +1,7 @@
+import { and, eq, inArray } from 'drizzle-orm';
 import { TaskInput, TaskUpdateInput } from '../types';
-import { prisma } from '../lib/prisma';
+import { db } from '../lib/db';
+import { tasks, taskTags } from '../db/schema';
 
 export class TaskService {
   async getAllTasks(filters?: {
@@ -9,45 +11,34 @@ export class TaskService {
     status?: number;
   }) {
     try {
-      if (filters?.tagId) {
+      if (filters?.tagId !== undefined) {
         // Get tasks by tag
-        return await prisma.task.findMany({
-          where: {
-            tags: {
-              some: {
-                tagId: filters.tagId,
-              },
-            },
-          },
-          include: {
+        return await db.query.tasks.findMany({
+          where: inArray(
+            tasks.id,
+            db.select({ id: taskTags.taskId }).from(taskTags).where(eq(taskTags.tagId, filters.tagId)),
+          ),
+          with: {
             project: true,
-            tags: {
-              include: {
-                tag: true,
-              },
-            },
+            tags: { with: { tag: true } },
           },
         });
       }
 
       // Get tasks with optional filters
-      return await prisma.task.findMany({
-        where: {
-          ...(filters?.projectId && { projectId: filters.projectId }),
-          ...(filters?.priority !== undefined && { priority: filters.priority }),
-          ...(filters?.status !== undefined && { status: filters.status }),
-        },
-        include: {
+      const conditions = [
+        ...(filters?.projectId !== undefined ? [eq(tasks.projectId, filters.projectId)] : []),
+        ...(filters?.priority !== undefined ? [eq(tasks.priority, filters.priority)] : []),
+        ...(filters?.status !== undefined ? [eq(tasks.status, filters.status)] : []),
+      ];
+
+      return await db.query.tasks.findMany({
+        where: conditions.length ? and(...conditions) : undefined,
+        with: {
           project: true,
-          tags: {
-            include: {
-              tag: true,
-            },
-          },
+          tags: { with: { tag: true } },
         },
-        orderBy: {
-          createdAt: 'desc',
-        },
+        orderBy: (task, { desc }) => [desc(task.createdAt)],
       });
     } catch (error) {
       throw new Error(`Failed to fetch tasks: ${error}`);
@@ -56,15 +47,11 @@ export class TaskService {
 
   async getTaskById(id: number) {
     try {
-      return await prisma.task.findUnique({
-        where: { id },
-        include: {
+      return await db.query.tasks.findFirst({
+        where: eq(tasks.id, id),
+        with: {
           project: true,
-          tags: {
-            include: {
-              tag: true,
-            },
-          },
+          tags: { with: { tag: true } },
         },
       });
     } catch (error) {
@@ -85,24 +72,19 @@ export class TaskService {
     }
 
     try {
-      return await prisma.task.create({
-        data: {
+      const [created] = await db
+        .insert(tasks)
+        .values({
           title: input.title,
           description: input.description,
           priority: input.priority,
           status: input.status,
           progress: input.progress || 0,
           projectId: input.projectId,
-        },
-        include: {
-          project: true,
-          tags: {
-            include: {
-              tag: true,
-            },
-          },
-        },
-      });
+        })
+        .returning();
+
+      return this.getTaskById(created.id);
     } catch (error) {
       throw new Error(`Failed to create task: ${error}`);
     }
@@ -121,25 +103,19 @@ export class TaskService {
     }
 
     try {
-      return await prisma.task.update({
-        where: { id },
-        data: {
+      await db
+        .update(tasks)
+        .set({
           ...(input.title && { title: input.title }),
           ...(input.description !== undefined && { description: input.description }),
           ...(input.priority !== undefined && { priority: input.priority }),
           ...(input.status !== undefined && { status: input.status }),
           ...(input.progress !== undefined && { progress: input.progress }),
           ...(input.projectId !== undefined && { projectId: input.projectId }),
-        },
-        include: {
-          project: true,
-          tags: {
-            include: {
-              tag: true,
-            },
-          },
-        },
-      });
+        })
+        .where(eq(tasks.id, id));
+
+      return this.getTaskById(id);
     } catch (error) {
       throw new Error(`Failed to update task: ${error}`);
     }
@@ -147,9 +123,7 @@ export class TaskService {
 
   async deleteTask(id: number) {
     try {
-      await prisma.task.delete({
-        where: { id },
-      });
+      await db.delete(tasks).where(eq(tasks.id, id));
       return true;
     } catch (error) {
       throw new Error(`Failed to delete task: ${error}`);
@@ -159,22 +133,12 @@ export class TaskService {
   async addTagToTask(taskId: number, tagId: number) {
     try {
       // Check if tag already exists for task
-      const existing = await prisma.taskTag.findUnique({
-        where: {
-          taskId_tagId: {
-            taskId,
-            tagId,
-          },
-        },
+      const existing = await db.query.taskTags.findFirst({
+        where: and(eq(taskTags.taskId, taskId), eq(taskTags.tagId, tagId)),
       });
 
       if (!existing) {
-        await prisma.taskTag.create({
-          data: {
-            taskId,
-            tagId,
-          },
-        });
+        await db.insert(taskTags).values({ taskId, tagId });
       }
 
       return await this.getTaskById(taskId);
@@ -185,12 +149,7 @@ export class TaskService {
 
   async removeTagFromTask(taskId: number, tagId: number) {
     try {
-      await prisma.taskTag.deleteMany({
-        where: {
-          taskId,
-          tagId,
-        },
-      });
+      await db.delete(taskTags).where(and(eq(taskTags.taskId, taskId), eq(taskTags.tagId, tagId)));
 
       return await this.getTaskById(taskId);
     } catch (error) {

@@ -1,10 +1,12 @@
 # Allegro
 
-A lightweight REST API framework built on Node.js, Express.js, Prisma, and TypeScript. Allegro provides the structure and conventions for building data-driven APIs — routing, validation, error handling, and database access — without dictating what your domain looks like.
+A lightweight REST API framework built on Node.js, Express.js, Drizzle ORM, and TypeScript. Allegro provides the structure and conventions for building data-driven APIs — routing, validation, error handling, and database access — without dictating what your domain looks like.
 
 This repository includes a **task management example** (projects, tasks, tags) to demonstrate how the framework patterns fit together in a real implementation. The example is not the framework itself.
 
 > **Migration Note**: This is a conversion of the original PHP/Maestro framework application to a modern Node.js REST stack.
+>
+> **ORM Note (2026-09-18)**: The database layer was migrated from Prisma to [Drizzle ORM](https://orm.drizzle.team/) with [`@libsql/client`](https://github.com/tursodatabase/libsql-client-ts) as the SQLite driver. See [Migration from Prisma to Drizzle](#migration-from-prisma-to-drizzle) below for what changed and why.
 
 ## Quick Start
 
@@ -19,8 +21,8 @@ This repository includes a **task management example** (projects, tasks, tags) t
 npm install
 
 # Set up the database
-npm run prisma:migrate
-npm run prisma:seed     # Seed with LOTR-themed sample data
+npm run db:migrate
+npm run db:seed     # Seed with LOTR-themed sample data
 
 npm run dev
 ```
@@ -41,15 +43,18 @@ npm start
 ```
 src/
 ├── server.ts              # App setup: middleware, route mounting, error handler
+├── db/
+│   ├── schema.ts           # Drizzle table + relation definitions
+│   └── seed.ts             # Database seed script
 ├── lib/
-│   └── prisma.ts          # Shared Prisma client (SQLite adapter)
+│   └── db.ts               # Shared Drizzle client (libSQL driver)
 ├── middleware/
 │   └── errorHandling.ts   # asyncHandler wrapper + central error handler
 ├── routes/                # One file per resource, mounted in server.ts
 │   ├── projects.ts
 │   ├── tasks.ts
 │   └── tags.ts
-├── services/              # Business logic (all Prisma interactions)
+├── services/              # Business logic (all Drizzle interactions)
 │   ├── ProjectService.ts
 │   ├── TaskService.ts
 │   └── TagService.ts
@@ -58,14 +63,10 @@ src/
 └── validation/
     └── schemas.ts         # Zod validation schemas
 
-prisma/
-├── schema.prisma          # Prisma data model
-└── seed.ts                # Database seed script
+drizzle/
+└── migrations/            # Generated SQL migrations + journal
 
-generated/
-└── prisma/                # Generated Prisma client (do not edit)
-
-prisma.config.ts           # Prisma 7 configuration
+drizzle.config.ts          # Drizzle Kit configuration
 ```
 
 ---
@@ -83,24 +84,24 @@ sequenceDiagram
     participant routes/resource.ts
     participant asyncHandler
     participant ResourceService
-    participant Prisma
+    participant Drizzle
     participant SQLite
 
     Client->>server.ts: HTTP request
     server.ts->>routes/resource.ts: app.use('/resource', resourceRouter)
     routes/resource.ts->>asyncHandler: wraps route handler
     asyncHandler->>ResourceService: service.getById(id)
-    ResourceService->>Prisma: prisma.resource.findUnique(...)
-    Prisma->>SQLite: SELECT ...
-    SQLite-->>Prisma: row data
-    Prisma-->>ResourceService: typed object
+    ResourceService->>Drizzle: db.query.resource.findFirst(...)
+    Drizzle->>SQLite: SELECT ...
+    SQLite-->>Drizzle: row data
+    Drizzle-->>ResourceService: typed object
     ResourceService-->>asyncHandler: result
     asyncHandler-->>Client: res.json(result)
 ```
 
 ### Error flow
 
-When anything throws — a Zod parse failure, a service error, or a Prisma exception — `asyncHandler` forwards it to the central error handler without any per-route try/catch.
+When anything throws — a Zod parse failure, a service error, or a Drizzle/SQLite exception — `asyncHandler` forwards it to the central error handler without any per-route try/catch.
 
 ```mermaid
 sequenceDiagram
@@ -126,20 +127,24 @@ export const createExampleResourceInputSchema = z.object({
 **2. Add a service class** in `src/services/ExampleResourceService.ts`:
 
 ```ts
-import { prisma } from '../lib/prisma';
+import { db } from '../lib/db';
+import { exampleResources } from '../db/schema';
 
 export class ExampleResourceService {
   async getAllExampleResources() {
-    return prisma.exampleResource.findMany();
+    return db.query.exampleResources.findMany();
   }
 
   async createExampleResource(input: { name: string }) {
-    return prisma.exampleResource.create({ data: input });
+    const [created] = await db.insert(exampleResources).values(input).returning();
+    return created;
   }
 }
 
 export const exampleResourceService = new ExampleResourceService();
 ```
+
+(Add the corresponding table to `src/db/schema.ts` and run `npm run db:generate` + `npm run db:migrate` before using it.)
 
 Export it from `src/services/index.ts`:
 
@@ -296,9 +301,10 @@ npm run dev              # Start dev server with hot reload
 npm run build            # Compile TypeScript
 npm start                # Run compiled build
 
-npm run prisma:migrate   # Run database migrations
-npm run prisma:seed      # Seed sample data
-npm run prisma:studio    # Open Prisma Studio GUI
+npm run db:generate      # Generate a SQL migration from src/db/schema.ts
+npm run db:migrate       # Apply pending migrations
+npm run db:seed          # Seed sample data
+npm run db:studio        # Open Drizzle Studio GUI
 npm run type-check       # TypeScript check without building
 ```
 
@@ -319,15 +325,14 @@ NODE_ENV=development
 ### Production
 
 - **express** — web framework
-- **@prisma/client** (v7) — database ORM
-- **@prisma/adapter-better-sqlite3** — SQLite driver for Prisma 7
-- **better-sqlite3** — SQLite native driver
+- **drizzle-orm** — database ORM
+- **@libsql/client** — SQLite driver (local file mode, no native compilation)
 - **zod** — runtime validation
 - **cors** — CORS middleware
 
 ### Development
 
-- **prisma** (v7) — CLI for migrations and codegen
+- **drizzle-kit** — CLI for migrations and Drizzle Studio
 - **typescript**, **ts-node-dev** — TypeScript tooling
 
 ---
@@ -345,7 +350,7 @@ The seed script populates the example domain with Lord of the Rings themed data:
 ## Security Notes
 
 - Input validated with Zod before reaching the database
-- Prisma uses parameterized queries (SQL injection safe)
+- Drizzle uses parameterized queries (SQL injection safe)
 - CORS enabled for local development
 
 ---
@@ -357,13 +362,44 @@ The example domain was originally built on a PHP/Maestro framework. Allegro is i
 | Aspect | PHP | Allegro |
 | --- | --- | --- |
 | Framework | Custom Maestro MVC | Express.js |
-| ORM | Repository Pattern (PDO) | Prisma |
+| ORM | Repository Pattern (PDO) | Drizzle ORM |
 | API | REST | REST |
 | Language | PHP 8.2 | TypeScript 5.x |
 | Validation | Manual | Zod |
 | Database | SQLite | SQLite |
 
 **Original Authors**: Frans Blauw, Valeria Stamenova
+
+---
+
+## Migration from Prisma to Drizzle
+
+The database layer originally used Prisma (`@prisma/client` v7) with the `@prisma/adapter-better-sqlite3` driver. It was migrated to [Drizzle ORM](https://orm.drizzle.team/) on `@libsql/client`, mainly to get away from `better-sqlite3`'s native compilation (node-gyp builds that can break across Node version upgrades).
+
+### Why `@libsql/client` and not `better-sqlite3` again
+
+Drizzle also supports `better-sqlite3` directly, which would have been a smaller change. It was skipped because it has the same native-binding failure mode this migration was meant to fix. `@libsql/client` ships prebuilt binaries for more platforms and is actively maintained; it still works as a plain local SQLite file (`file:./database.sqlite`) with no server or remote account needed.
+
+Drizzle's `1.0` release line adds a driver for Node's built-in `node:sqlite` module, which would remove native bindings entirely. It wasn't used here because that release is still a release candidate (not yet the `latest` npm tag) as of this migration.
+
+### What changed
+
+| Aspect | Prisma | Drizzle |
+| --- | --- | --- |
+| Schema | `prisma/schema.prisma` (custom DSL) | `src/db/schema.ts` (plain TypeScript) |
+| Client | Generated into `generated/prisma/` | `drizzle-orm/libsql`, no codegen |
+| Driver | `better-sqlite3` (native, via adapter) | `@libsql/client` |
+| Migrations | `prisma/migrations/` | `drizzle/migrations/` |
+| Migration commands | `npm run prisma:migrate` | `npm run db:generate` + `npm run db:migrate` |
+| Seed script | `prisma/seed.ts` | `src/db/seed.ts` |
+| DB GUI | `npm run prisma:studio` | `npm run db:studio` |
+| Query style | `prisma.task.findMany({ include: ... })` | `db.query.tasks.findMany({ with: ... })` |
+
+The underlying SQLite table structure (names, columns, foreign keys, cascade behavior) is unchanged — the initial Drizzle migration in `drizzle/migrations/0000_init.sql` recreates the same schema the Prisma migration did.
+
+One behavioral fix made during the migration: `tasks.createdAt` previously relied on SQLite's `DEFAULT CURRENT_TIMESTAMP`, which stores a text timestamp that doesn't parse against Drizzle's integer/epoch `timestamp` column mode (it read back as `null`). The default is now computed in the application layer via `$defaultFn(() => new Date())` in `src/db/schema.ts` instead of in SQL.
+
+If you have an existing `database.sqlite` from before this migration, delete it and re-run `npm run db:migrate` + `npm run db:seed` — the column layout is identical, but starting fresh avoids any doubt about which migration history applied.
 
 ---
 

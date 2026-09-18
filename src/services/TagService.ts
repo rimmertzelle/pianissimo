@@ -1,20 +1,14 @@
+import { eq } from 'drizzle-orm';
 import { TagInput, TagUpdateInput } from '../types';
-import { prisma } from '../lib/prisma';
+import { db } from '../lib/db';
+import { tags } from '../db/schema';
 
 export class TagService {
   async getAllTags() {
     try {
-      return await prisma.tag.findMany({
-        include: {
-          tasks: {
-            include: {
-              task: true,
-            },
-          },
-        },
-        orderBy: {
-          title: 'asc',
-        },
+      return await db.query.tags.findMany({
+        with: { tasks: { with: { task: true } } },
+        orderBy: (tag, { asc }) => [asc(tag.title)],
       });
     } catch (error) {
       throw new Error(`Failed to fetch tags: ${error}`);
@@ -23,15 +17,9 @@ export class TagService {
 
   async getTagById(id: number) {
     try {
-      return await prisma.tag.findUnique({
-        where: { id },
-        include: {
-          tasks: {
-            include: {
-              task: true,
-            },
-          },
-        },
+      return await db.query.tags.findFirst({
+        where: eq(tags.id, id),
+        with: { tasks: { with: { task: true } } },
       });
     } catch (error) {
       throw new Error(`Failed to fetch tag: ${error}`);
@@ -44,18 +32,8 @@ export class TagService {
     }
 
     try {
-      return await prisma.tag.create({
-        data: {
-          title: input.title,
-        },
-        include: {
-          tasks: {
-            include: {
-              task: true,
-            },
-          },
-        },
-      });
+      const [created] = await db.insert(tags).values({ title: input.title }).returning();
+      return this.getTagById(created.id);
     } catch (error) {
       throw new Error(`Failed to create tag: ${error}`);
     }
@@ -67,19 +45,14 @@ export class TagService {
     }
 
     try {
-      return await prisma.tag.update({
-        where: { id },
-        data: {
+      await db
+        .update(tags)
+        .set({
           ...(input.title && { title: input.title }),
-        },
-        include: {
-          tasks: {
-            include: {
-              task: true,
-            },
-          },
-        },
-      });
+        })
+        .where(eq(tags.id, id));
+
+      return this.getTagById(id);
     } catch (error) {
       throw new Error(`Failed to update tag: ${error}`);
     }
@@ -87,9 +60,7 @@ export class TagService {
 
   async deleteTag(id: number) {
     try {
-      await prisma.tag.delete({
-        where: { id },
-      });
+      await db.delete(tags).where(eq(tags.id, id));
       return true;
     } catch (error) {
       throw new Error(`Failed to delete tag: ${error}`);
