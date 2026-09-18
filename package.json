@@ -1,5 +1,5 @@
 {
-  "name": "allegro",
+  "name": "pianissimo",
   "version": "1.0.0",
   "description": "Task management REST API",
   "main": "dist/server.js",

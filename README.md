@@ -1,6 +1,6 @@
-# Allegro
+# Pianissimo
 
-A lightweight REST API framework built on Node.js, Express.js, Drizzle ORM, and TypeScript. Allegro provides the structure and conventions for building data-driven APIs — routing, validation, error handling, and database access — without dictating what your domain looks like.
+A lightweight REST API framework built on Node.js, Express.js, Drizzle ORM, and TypeScript. Pianissimo provides the structure and conventions for building data-driven APIs — routing, validation, error handling, and database access — without dictating what your domain looks like.
 
 This repository includes a **task management example** (projects, tasks, tags) to demonstrate how the framework patterns fit together in a real implementation. The example is not the framework itself.
 
@@ -12,7 +12,7 @@ This repository includes a **task management example** (projects, tasks, tags) t
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 20+ (developed and tested against Node.js 26)
 - npm
 
 ### Installation
@@ -357,9 +357,9 @@ The seed script populates the example domain with Lord of the Rings themed data:
 
 ## Migration from PHP
 
-The example domain was originally built on a PHP/Maestro framework. Allegro is its Node.js successor.
+The example domain was originally built on a PHP/Maestro framework. Pianissimo is its Node.js successor.
 
-| Aspect | PHP | Allegro |
+| Aspect | PHP | Pianissimo |
 | --- | --- | --- |
 | Framework | Custom Maestro MVC | Express.js |
 | ORM | Repository Pattern (PDO) | Drizzle ORM |
